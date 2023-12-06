@@ -12,7 +12,7 @@ contract TicketingSystem {
 
     struct Venue{
         bytes32 name;
-        uint capacity;
+        uint256 capacity;
         uint256 venueCommission;
         address payable owner;
     }
@@ -24,8 +24,8 @@ contract TicketingSystem {
         uint256 ticketPrice;
         bool validatedByArtist;
         bool validatedByVenue;
-        uint256 totalTicketSold;
-        uint256 totalMoneyCollected;
+        uint totalTicketSold;
+        uint totalMoneyCollected;
     }
 
     struct Ticket{
@@ -47,9 +47,9 @@ contract TicketingSystem {
 
     mapping(uint256 => Venue) public venuesRegister;
     mapping(bytes32 => uint256) private venuesId;
-    
+
     mapping(uint256 => Concert) public concertsRegister;
-    // mapping(bytes32 => uint256) private concertsId;
+    mapping(bytes32 => uint256) private concertsId;
 
     mapping(uint256 => Ticket) public ticketsRegister;
     mapping(bytes32 => uint256) private ticketsId;
@@ -68,7 +68,6 @@ contract TicketingSystem {
         artistsRegister[_artistId].owner = _newOwner;
     }
 
-    //Venue
     function createVenue(bytes32 venueName, uint256 capacity, uint256 venueCommission) public{
         require(bytes32(venueName).length > 0, "Venue name cannot be empty");
         venueCount++;
@@ -84,38 +83,36 @@ contract TicketingSystem {
         venuesRegister[venueId].owner = newOwner;
     }
 
-
-    //Concert
-    function createConcert(uint256 artistId, uint256 venueId, uint256 concertDate, uint256 ticketPrice) public{
-        
+    function createConcert(uint256 _artistId, uint256 _venueId, uint256 _concertDate, uint256 _ticketPrice) public {
         concertCount++;
-        concertsRegister[concertCount] = Concert(artistId, venueId, concertDate, ticketPrice, false, false, 0, 0);
-        if (msg.sender == artistsRegister[artistId].owner){
-            concertsRegister[concertCount].validatedByArtist = true;
+        concertsRegister[concertCount] = Concert(_artistId, _venueId, _concertDate, _ticketPrice, false, false, 0, 0);
+        if (artistsRegister[_artistId].owner == msg.sender) concertsRegister[concertCount].validatedByArtist = true;
+    }   
+
+    function validateConcert(uint256 _concertId) public {
+        require(
+        msg.sender == artistsRegister[concertsRegister[_concertId].artistId].owner ||
+        msg.sender == venuesRegister[concertsRegister[_concertId].venueId].owner,
+        "Not authorized to validate concert");
+        if (msg.sender == artistsRegister[concertsRegister[_concertId].artistId].owner) {
+            concertsRegister[_concertId].validatedByArtist = true;
+        } 
+        else {
+            concertsRegister[_concertId].validatedByVenue = true;
         }
-        // concertsId[concertsRegister[concertCount].artistId] = concertCount;
     }
 
-    function validateConcert(uint256 concertId) public{
-        if (msg.sender == artistsRegister[concertsRegister[concertId].artistId].owner){
-            concertsRegister[concertId].validatedByArtist = true;
-        }
-        if (msg.sender == venuesRegister[concertsRegister[concertId].venueId].owner){
-            concertsRegister[concertId].validatedByVenue = true;
-        }
-    }
-
-    function emitTicket(uint _concertId, address payable _ticketOwner) public{
+    function emitTicket(uint256 _concertId, address payable _ticketOwner) public {
         require(msg.sender == artistsRegister[concertsRegister[_concertId].artistId].owner, "not the owner");
         ticketCount++;
         ticketsRegister[ticketCount] = Ticket(_concertId, _ticketOwner, true, false, 0);
-        concertsRegister[_concertId].totalTicketSold += 1;
+        concertsRegister[_concertId].totalTicketSold++;
     }
 
-    function useTicket(uint _ticketId) public{
+    function useTicket(uint256 _ticketId) public {
         require(msg.sender == ticketsRegister[_ticketId].owner, "sender should be the owner");
+        require(block.timestamp+60*60*24 >= concertsRegister[ticketsRegister[_ticketId].concertId].concertDate, "should be used the d-day");
         require(concertsRegister[ticketsRegister[_ticketId].concertId].validatedByVenue, "should be validated by the venue");
-        require(concertsRegister[ticketsRegister[_ticketId].concertId].concertDate <=block.timestamp +60*60*24 , "should be used the d-day");
         ticketsRegister[_ticketId].isAvailable = false;
         ticketsRegister[_ticketId].owner = payable(address(0));
     }
@@ -123,7 +120,7 @@ contract TicketingSystem {
     function buyTicket(uint _concertId) public payable {
         ticketCount++;
         ticketsRegister[ticketCount] = Ticket(_concertId, payable(msg.sender), true, false, msg.value);
-        concertsRegister[_concertId].totalTicketSold += 1;
+        concertsRegister[_concertId].totalTicketSold++;
         concertsRegister[_concertId].totalMoneyCollected += msg.value;
     }
 
@@ -132,33 +129,21 @@ contract TicketingSystem {
         ticketsRegister[_ticketId].owner = _newOwner;
     }
 
-    function cashOutConcert(uint _concertId, address payable _cashOutAddress) public {
-        // Ensure that the current timestamp is after the concert date
-        require(block.timestamp >= concertsRegister[_concertId].concertDate, "should be after the concert");
+    function cashOutConcert(uint256 _concertId, address payable _cashOutAddress) public {
+        require(block.timestamp >= concertsRegister[_concertId].concertDate,"should be after the concert");
+        require(artistsRegister[concertsRegister[_concertId].artistId].owner == msg.sender, "should be the artist");
+        
+        uint256 totalTicketSales = concertsRegister[_concertId].ticketPrice * concertsRegister[_concertId].totalTicketSold;
+        uint256 venueShare = (totalTicketSales * venuesRegister[concertsRegister[_concertId].venueId].venueCommission) / 10000;
+        uint256 artistShare = totalTicketSales - venueShare;
 
-        // Ensure that the caller is the artist
-        address artistOwner = artistsRegister[concertsRegister[_concertId].artistId].owner;
-        require(msg.sender == artistOwner, "should be the artist");
+        _cashOutAddress.call{value: artistShare}("");
+        venuesRegister[concertsRegister[_concertId].venueId].owner.call{value: venueShare}("");
 
-        // Retrieve information about the concert
-        Concert storage concert = concertsRegister[_concertId];
-
-        // Calculate venue and artist commissions
-        uint256 totalTicketSale = concert.totalTicketSold * 2;
-        uint256 venueShare = (totalTicketSale * venuesRegister[concert.venueId].venueCommission) / 10000;
-        uint256 artistCommission = totalTicketSale - venueShare;
-
-        // Transfer funds to the venue owner
-        payable(venuesRegister[concert.venueId].owner).transfer(venueShare);
-
-        // Transfer funds to the artist
-        payable(artistOwner).transfer(artistCommission);
-
-        // Transfer remaining funds to the specified cash-out address
-        payable(_cashOutAddress).transfer(address(this).balance);
+        artistsRegister[concertsRegister[_concertId].artistId].totalTicketSold += concertsRegister[_concertId].totalTicketSold;
     }
-    
 
+    
     function offerTicketForSale(uint _ticketId, uint _salePrice) public{
         require(msg.sender == ticketsRegister[_ticketId].owner, "should be the owner");
         require(_salePrice < ticketsRegister[_ticketId].amountPaid, "should be less than the amount paid");
@@ -168,11 +153,20 @@ contract TicketingSystem {
 
     }
 
-    function buySecondHandTicket(uint256 _ticketId) public payable{
-        require(msg.value >= ticketsRegister[_ticketId].amountPaid, "not enough funds");
-        require(ticketsRegister[_ticketId].isAvailableForSale, "should be available");
-        ticketsRegister[_ticketId].owner = payable(msg.sender);
-        ticketsRegister[_ticketId].isAvailableForSale = false;
-        ticketsRegister[_ticketId].amountPaid = msg.value;
+    function buySecondHandTicket(uint256 _ticketId) public payable {
+        Ticket storage ticketTemp = ticketsRegister[_ticketId];
+        require(ticketTemp.isAvailable, "should be available");
+        require(msg.value >= ticketTemp.amountPaid, "not enough funds");
+
+        address payable previousOwner = ticketTemp.owner;
+        ticketTemp.owner = payable(msg.sender);
+
+        previousOwner.call{value: ticketTemp.amountPaid}("");
+
+        ticketTemp.isAvailableForSale = false;
+        ticketTemp.amountPaid =0;
     }
+
+
+
 }
